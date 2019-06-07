@@ -1,3 +1,12 @@
+"""
+    @nghia nh
+    ---
+    Multinomial Naive Bayes,
+    many-to-one assumption,
+    EM algorithm
+
+"""
+
 import logging
 
 import numpy as np
@@ -6,7 +15,14 @@ from sklearn.naive_bayes import MultinomialNB
 
 
 class MultinomialManyToOneEM(MultinomialNB):
+    """
+    Multinomial Naive Bayes with many-to-one assumption and EM algorithm
+    """
     def __init__(self, epsilon=1e-3):
+        """
+        Follow the ClassifierMixin template of scikit-learn
+        :param epsilon: threshold for convergence condition
+        """
         MultinomialNB.__init__(self)
 
         self.component_sum_up = [0]
@@ -17,6 +33,12 @@ class MultinomialManyToOneEM(MultinomialNB):
         self.classes_ = None
 
     def _m_step(self, x, label_pr):
+        """
+        maximization step: re-estimate new parameters
+        :param x: data instances (n_instances x n_features)
+        :param label_pr: distribution label on data (n_instances x n_components)
+        :return:
+        """
         self.class_count_ = np.zeros(self.component_number, dtype=np.float64)
         self.feature_count_ = np.zeros(
             (self.component_number, self.feature_number),
@@ -29,6 +51,14 @@ class MultinomialManyToOneEM(MultinomialNB):
         self._update_class_log_prior()
 
     def fit(self, x, y_l, component_numbers=None, data_label_pr=None):
+        """
+        fit input data into model, EM algorithm
+        :param x: input data
+        :param y_l: labeled for labeled instances
+        :param component_numbers: list of component number for each label
+        :param data_label_pr: init distribution of components on labeled data
+        :return:
+        """
         logging.info('MultinomialManyToOneEM: fit: '
                      'component_numbers {}'.format(component_numbers))
 
@@ -74,14 +104,20 @@ class MultinomialManyToOneEM(MultinomialNB):
         return self
 
     def predict(self, x):
-        """Estimated value of x for each class"""
+        """
+        Estimated value of x for each class
+        :param x: test data
+        :return:
+        """
         jll = self._joint_log_likelihood(x)
         class_number = len(self.component_sum_up) - 1
         predicted = np.zeros((len(x), class_number))
 
+        # sum up the predicted pr of all components in a label
         for i in range(class_number):
             start_po = self.component_sum_up[i]
             end_po = self.component_sum_up[i + 1]
             predicted[:, i] = np.sum(jll[:, start_po:end_po], axis=1)
 
-        return np.argmax(jll, axis=1)
+        # predict the label that has max pr on its all components
+        return np.argmax(predicted, axis=1)

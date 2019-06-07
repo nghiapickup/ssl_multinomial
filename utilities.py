@@ -3,8 +3,9 @@ import copy
 
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering
+from sklearn.cluster import KMeans
 from sklearn.model_selection import StratifiedShuffleSplit
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import f1_score
 
 from multinomial_model import MultinomialManyToOneEM
 
@@ -64,6 +65,9 @@ class ResultExporter:
 
 
 class RandomAssignment:
+    """
+    Init Random assignment for label on labeled data as in Nigam's paper
+    """
     def __init__(self):
         self.labels = None
         self.data_number = 0
@@ -104,6 +108,9 @@ class RandomAssignment:
 
 
 class TreeAssignment:
+    """
+    Init agglomerative tree assignment for label on labeled data
+    """
     def __init__(self):
         self.x = None
         self.labels =None
@@ -129,6 +136,7 @@ class TreeAssignment:
             label_indices = (self.labels == label_id)
 
             tree = AgglomerativeClustering(
+                # affinity='cosine',
                 linkage='average',
                 n_clusters=component_numbers[label_id]
             ).fit(self.x[label_indices])
@@ -139,42 +147,89 @@ class TreeAssignment:
         return assignment
 
 
+class KMeansAssignment:
+    """
+    Init k-means assignment for label on labeled data
+    """
+    def __init__(self):
+        self.x = None
+        self.labels =None
+        self.data_number = 0
+        self.components = []
+
+    def fit(self, labels, x):
+        self.x = x
+        self.labels = labels
+        self.data_number = len(x)
+        return self
+
+    def get_assignment(self, component_numbers):
+        component_sum_up = [0]
+        for count in component_numbers:
+            component_sum_up.append(count + component_sum_up[-1])
+
+        assignment = np.zeros((self.data_number, component_sum_up[-1]))
+
+        for label_id in range(len(component_numbers)):
+            label_indices = (self.labels == label_id)
+
+            component = KMeans(
+                n_clusters=component_numbers[label_id]
+            ).fit(self.x[label_indices])
+
+            start_po = component_sum_up[label_id]
+            assignment[label_indices, component.labels_ + start_po] = 1
+
+        return assignment
+
+
 class ParamSearch:
     def __init__(self):
-        self.MAX_COMPONENT = 10
+        self.MAX_COMPONENT = 15
         self.search_map = {
             'random': RandomAssignment,
-            'tree': TreeAssignment
+            'tree': TreeAssignment,
+            'kmeans': KMeansAssignment
         }
 
     def component_search(self, x_l, y_l, x_u, type='random'):
+        """
+        Search component numbers for each label using labeled data
+        :param x_l: labeled instances
+        :param y_l: labeled label
+        :param x_u: unlabeled instances
+        :param type: type of initialization components, defined in search_map
+        :return:
+        """
         logging.info('ParamSearch: {} assignment'.format(type))
 
         assignment = self.search_map[type]()
         max_score = 0
         max_components = None
+        n_splits = 2
 
         for i in range(1, self.MAX_COMPONENT):
             for j in range(1, self.MAX_COMPONENT):
                 sss_data = StratifiedShuffleSplit(
-                    n_splits=1,
+                    n_splits=n_splits,
                     test_size=0.5,
                     random_state=0
                 )
-                train_index, test_index = sss_data.split(x_l, y_l).__next__()
-
+                score = 0
                 components = [i, j]
 
-                assignment.fit(y_l[train_index], x_l[train_index])
-                label_pr = assignment.get_assignment(components)
-                y_predict = MultinomialManyToOneEM().fit(
-                    x=[x_l[train_index], x_u],
-                    y_l=y_l[train_index],
-                    component_numbers=components,
-                    data_label_pr=label_pr
-                ).predict(x_l[test_index])
+                for train_index, test_index in sss_data.split(x_l, y_l):
+                    assignment.fit(y_l[train_index], x_l[train_index])
+                    label_pr = assignment.get_assignment(components)
+                    y_predict = MultinomialManyToOneEM().fit(
+                        x=[x_l[train_index], x_u],
+                        y_l=y_l[train_index],
+                        component_numbers=components,
+                        data_label_pr=label_pr
+                    ).predict(x_l[test_index])
 
-                score = accuracy_score(y_l[test_index], y_predict)
+                    score += f1_score(y_l[test_index], y_predict)
+
                 if score > max_score:
                     max_score = score
                     max_components = components
